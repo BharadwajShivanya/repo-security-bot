@@ -24,8 +24,6 @@ jobs:
         continue-on-error: true
         uses: gitleaks/gitleaks-action@v2
         with:
-          # The action's inputs are all that's needed.
-          # 'continue-on-error: true' will ensure the job doesn't fail if secrets are found.
           report_path: reports/gitleaks.json
           report_format: json
 
@@ -38,12 +36,10 @@ jobs:
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         run: |
-          # This ensures the script will exit if any command fails
           set -e
           echo "Checking for dependency files..."
           if [ -f "package.json" ]; then
             echo "Node.js project detected."
-            # The '|| true' ensures the step continues even if snyk finds issues
             snyk test --json-file-output=reports/snyk.json || true
           elif [ -f "requirements.txt" ] || [ -f "pyproject.toml" ] || [ -f "Pipfile" ]; then
             echo "Python project detected."
@@ -75,14 +71,25 @@ jobs:
           fi
 
       # --- 3. 🧱 IaC Scanning (Checkov) ---
+      # FIX: Run Checkov to output to a root file, as it can misinterpret paths
       - name: Run Checkov
         continue-on-error: true
         uses: bridgecrewio/checkov-action@master
         with:
           directory: .
           output_format: json
-          # FIX: Output to a new, unambiguous filename to avoid the 'Is a directory' error.
-          output_file_path: reports/checkov_results.json
+          output_file_path: checkov_results.json # Output to root
+
+      # FIX: Move the report to the 'reports' folder for consistency
+      - name: Move Checkov Report
+        if: always() # Always run this, even if Checkov found issues
+        run: |
+          if [ -f "checkov_results.json" ]; then
+            mv checkov_results.json reports/
+          else
+            echo "Checkov report not found. Creating placeholder."
+            echo '{"message": "Checkov scan failed or no files found."}' > reports/checkov_results.json
+          fi
 
       # --- 4. 🐳 Docker Hardening (Dockle) ---
       - name: Run Dockle
@@ -98,14 +105,14 @@ jobs:
             docker pull goodwithtech/dockle
             
             # 3. SCAN THE IMAGE
-            # FIX: Mount the host's Docker socket (-v /var/run/docker.sock:...)
-            # This allows the Dockle container to see the 'my-scan-image:latest'
-            # image that was just built by the runner.
+            # FIX 1: Mount the Docker socket to allow the Dockle container to see host images
+            # FIX 2: Mount the 'reports' dir to '/reports' in the container
             docker run --rm \
               -v /var/run/docker.sock:/var/run/docker.sock \
+              -v ${{ github.workspace }}/reports:/reports \
               goodwithtech/dockle:latest \
               -f json \
-              -o reports/dockle.json \
+              -o /reports/dockle.json \
               my-scan-image:latest || true
               
           else
@@ -117,7 +124,6 @@ jobs:
       - name: Run Bandit
         continue-on-error: true
         run: |
-          # Check if any .py files exist
           if ls *.py >/dev/null 2>&1; then
             echo "Python files found. Installing and running Bandit..."
             pip install bandit
@@ -129,6 +135,7 @@ jobs:
 
       # --- 6. 🧩 Generate Markdown Summary (FIXED) ---
       - name: Generate Markdown Summary
+        if: always() # Always run this step to generate a summary
         run: |
           echo "# 🔒 Security Scan Summary" > reports/security-summary.md
           echo "" >> reports/security-summary.md
@@ -154,19 +161,22 @@ jobs:
           echo "" >> reports/security-summary.md
 
           echo "## 🧱 Checkov (IaC Scan)" >> reports/security-summary.md
-          # FIX: Use the new filename 'checkov_results.json'
+          # FIX: Read from the correct, moved file
           if [ -s "reports/checkov_results.json" ]; then
-            echo '```json' >> reports/security-summary.md
-            cat reports/checkov_results.json >> reports/security-summary.md
-            echo '```' >> reports/security-summary.md
+            if grep -q "Checkov scan failed" reports/checkov_results.json; then
+              echo "_Checkov scan failed or no files found._" >> reports/security-summary.md
+            else
+              echo '```json' >> reports/security-summary.md
+              cat reports/checkov_results.json >> reports/security-summary.md
+              echo '```' >> reports/security-summary.md
+            fi
           else
-            echo "_No IaC files found or scan failed._" >> reports/security-summary.md
+            echo "_Checkov report file not found._" >> reports/security-summary.md
           fi
           echo "" >> reports/security-summary.md
 
           echo "## 🐳 Dockle (Docker Hardening)" >> reports/security-summary.md
           if [ -s "reports/dockle.json" ]; then
-            # Check if it's the "skip" message
             if grep -q "No Dockerfile found" reports/dockle.json; then
               echo "_No Dockerfile found._" >> reports/security-summary.md
             else
@@ -181,7 +191,6 @@ jobs:
 
           echo "## 🐍 Bandit (Python Security)" >> reports/security-summary.md
           if [ -s "reports/bandit.json" ]; then
-            # Check if it's the "skip" message
             if grep -q "No Python files found" reports/bandit.json; then
               echo "_No Python files found._" >> reports/security-summary.md
             else
@@ -199,6 +208,7 @@ jobs:
 
       # --- 7. 📦 Upload Summary Report ---
       - name: Upload Summary Report
+        if: always() # Always run this
         uses: actions/upload-artifact@v4
         with:
           name: security-summary

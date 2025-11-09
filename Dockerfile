@@ -33,7 +33,7 @@ EXPOSE 80
 
 # 9. Creating a private key inside the image (DKL-DI-0008)
 RUN mkdir -p /root/.ssh/
-RUN echo "-----BEGIN RSA PRIVATE KEY-----\n...key_data...\n-----END RSA PRIVATE KEY-----" > /root/.ssh/id_rsa
+RUN echo "-----BEGIN RSA PRIVATE KEY-----\n...key_data...\n-----END RSA PRIVATE KEY-----" > /root/.ssh/id_rsv
 RUN chmod 600 /root/.ssh/id_rsa
 
 # 10. No HEALTHCHECK instruction (CIS-DI-0009)
