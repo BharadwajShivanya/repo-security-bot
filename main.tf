@@ -4,7 +4,7 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "3.0.0"   # outdated
+      version = "3.0.0"
     }
   }
 }
@@ -17,19 +17,14 @@ provider "aws" {
 
 resource "aws_s3_bucket" "public_bucket" {
   bucket = "vulnerable-test-bucket-example"
-  acl    = "public-read"   # insecure
+  acl    = "public-read"
 
   versioning {
-    enabled = false         # should be true
+    enabled = false
   }
 
-  server_side_encryption_configuration {
-    rule {
-      apply_server_side_encryption_by_default {
-        sse_algorithm = "AES256"   # valid (but we can mark encryption disabled separately)
-      }
-    }
-  }
+  # Intentionally insecure: no encryption block at all  
+  # Checkov will flag this as "S3 bucket does not have encryption enabled."
 
   tags = {
     Environment = "test"
@@ -46,13 +41,13 @@ resource "aws_security_group" "bad_sg" {
     from_port   = 0
     to_port     = 65535
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]   # insecure
+    cidr_blocks = ["0.0.0.0/0"]
   }
 
   egress {
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]   # insecure
+    cidr_blocks = ["0.0.0.0/0"]
   }
 }
